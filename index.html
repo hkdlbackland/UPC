@@ -38,9 +38,9 @@ input:focus,select:focus{outline:none}
 <body>
 <div id="app"></div>
 <script>
-const API='https://script.google.com/macros/s/AKfycbzfcLDC-pQgiVDe4hXJO_mJ8AZ9PYGvfAO91I3vMscybbYQyD8dWjokcP_KELX1cyk1/exec';
+var API='https://script.google.com/macros/s/AKfycbzfcLDC-pQgiVDe4hXJO_mJ8AZ9PYGvfAO91I3vMscybbYQyD8dWjokcP_KELX1cyk1/exec';
 
-let S={
+var S={
   view:'main',
   locations:[],
   items:[],
@@ -52,66 +52,135 @@ let S={
   saving:false,
   editItem:null,
   delConfirm:null,
-  addUpc:'',addName:'',addLoc:'',
+  addUpc:'',addName:'',addLoc:'',addStartDate:'',addEndDate:'',
   newLocText:'',
+  cleanedCount:0
 };
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function toast(m,icon){S.toast=m;S.toastIcon=icon||'';render();setTimeout(()=>{S.toast='';render();},1800);}
+function toast(m,icon){S.toast=m;S.toastIcon=icon||'';render();setTimeout(function(){S.toast='';render();},2200);}
+
+/* ── Date helpers ── */
+function fmtDate(d){
+  if(!d)return '';
+  var dt=new Date(d+'T00:00:00');
+  return (dt.getMonth()+1)+'/'+dt.getDate();
+}
+function fmtDateMD(d){
+  if(!d)return '';
+  var dt=new Date(d+'T00:00:00');
+  return (dt.getMonth()+1)+'月'+dt.getDate()+'日';
+}
+function todayStr(){
+  var n=new Date();
+  return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+}
+function daysDiff(dateStr){
+  if(!dateStr)return null;
+  var end=new Date(dateStr+'T00:00:00');
+  var now=new Date();now.setHours(0,0,0,0);
+  return Math.floor((end-now)/(1000*60*60*24));
+}
+
+function getItemStatus(item){
+  var hasStart=!!item.startDate;
+  var hasEnd=!!item.endDate;
+  if(!hasStart&&!hasEnd) return null; // 常駐
+
+  var now=todayStr();
+  var diffStart=hasStart?daysDiff(item.startDate):null;
+  var diffEnd=hasEnd?daysDiff(item.endDate):null;
+
+  // 未開始
+  if(hasStart&&diffStart>0){
+    return {type:'upcoming',label:fmtDateMD(item.startDate)+' 開始'+(hasEnd?' → '+fmtDateMD(item.endDate):''),color:'bg-blue-50 text-blue-500 border-blue-200',icon:'🔵',hide:false};
+  }
+  // 售賣中（有結束日）
+  if(hasEnd&&diffEnd>7){
+    var range=(hasStart?fmtDate(item.startDate)+' → ':'')+fmtDate(item.endDate);
+    return {type:'active',label:'售賣中 ('+range+')',color:'bg-emerald-50 text-emerald-600 border-emerald-200',icon:'🟢',hide:false};
+  }
+  // 即將完結
+  if(hasEnd&&diffEnd>0){
+    return {type:'ending',label:'剩 '+diffEnd+' 日結束',color:'bg-amber-50 text-amber-600 border-amber-200',icon:'🟡',hide:false};
+  }
+  if(hasEnd&&diffEnd===0){
+    return {type:'ending',label:'今日最後一日',color:'bg-amber-50 text-amber-600 border-amber-200',icon:'🟡',hide:false};
+  }
+  // 已過期
+  if(hasEnd&&diffEnd<0){
+    var past=Math.abs(diffEnd);
+    if(past<=15){
+      return {type:'expired',label:'已過期 '+past+' 日 ('+(15-past)+' 日後刪除)',color:'bg-rose-50 text-rose-500 border-rose-200',icon:'🔴',hide:false};
+    }
+    return {type:'delete'};
+  }
+  // 只有開始日，已開始
+  if(hasStart&&!hasEnd&&diffStart<=0){
+    return {type:'active',label:fmtDateMD(item.startDate)+' 起售賣',color:'bg-emerald-50 text-emerald-600 border-emerald-200',icon:'🟢',hide:false};
+  }
+  return null;
+}
 
 /* ── API ── */
 function api(params){
-  const url=API+'?'+Object.keys(params).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(params[k])).join('&');
-  return fetch(url).then(r=>r.json());
+  var url=API+'?'+Object.keys(params).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);}).join('&');
+  return fetch(url).then(function(r){return r.json();});
 }
 
 function loadAll(){
   S.loading=true;render();
-  api({action:'getAll'}).then(r=>{
+  api({action:'getAll'}).then(function(r){
     if(r.success){S.items=r.items||[];S.locations=r.locations||[];}
     else{toast('載入失敗: '+r.error,'⚠️');}
-    S.loading=false;render();
-  }).catch(e=>{S.loading=false;toast('網絡錯誤','⚠️');render();});
+    S.loading=false;
+    autoCleanExpired();
+    render();
+  }).catch(function(e){S.loading=false;toast('網絡錯誤','⚠️');render();});
+}
+
+/* ── Auto clean expired > 15 days ── */
+function autoCleanExpired(){
+  var toDelete=S.items.filter(function(i){
+    if(!i.endDate)return false;
+    var diff=daysDiff(i.endDate);
+    return diff!==null && diff < -15;
+  });
+  if(!toDelete.length)return;
+  var delIds=toDelete.map(function(i){return i.id;});
+  S.items=S.items.filter(function(i){return delIds.indexOf(i.id)===-1;});
+  S.cleanedCount=toDelete.length;
+  toDelete.forEach(function(item){
+    api({action:'deleteItem',id:item.id}).catch(function(){});
+  });
+  setTimeout(function(){
+    toast('已自動刪除 '+toDelete.length+' 件過期貨品','🧹');
+  },600);
 }
 
 function copyText(upc,name,el){
-  const text=upc+'\n'+name;
+  var text=upc+'\n'+name;
   if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(()=>toast(upc+' · '+name,'📋')).catch(()=>fb(text,upc,name));
+    navigator.clipboard.writeText(text).then(function(){toast(upc+' · '+name,'📋');}).catch(function(){fb(text,upc,name);});
   } else { fb(text,upc,name); }
   if(el){el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');}
 }
 function fb(text,upc,name){
-  const ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();
+  var ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();
   try{document.execCommand('copy');toast(upc+' · '+name,'📋');}catch(e){toast('複製失敗','⚠️');}
   document.body.removeChild(ta);
 }
 
-/* ── Render ── */
-function render(){
-  const app=document.getElementById('app');
-  let h='';
-  if(S.view==='main') h=mainView();
-  else h=settingsView();
-  if(S.editItem) h+=editModal();
-  if(S.delConfirm) h+=delModal();
-  if(S.toast) h+=`<div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-2xl toast-anim flex items-center gap-2 max-w-xs"><span>${S.toastIcon||'✅'}</span><span class="truncate">${S.toast}</span></div>`;
-  app.innerHTML=h;
-  bindAll();
-}
-
-/* ── 排序 helper ── */
+/* ── Sort helper ── */
 function sortLocKeys(keys){
-  /* 全部 Location → ALL location 最頂，其餘跟原序 */
   if(S.filterLoc==='all'){
-    return keys.sort((a,b)=>{
+    return keys.sort(function(a,b){
       if(a==='ALL location') return -1;
       if(b==='ALL location') return 1;
       return 0;
     });
   }
-  /* 揀咗特定 Location → 該 Location 最頂，ALL location 最底 */
-  return keys.sort((a,b)=>{
+  return keys.sort(function(a,b){
     if(a===S.filterLoc) return -1;
     if(b===S.filterLoc) return 1;
     if(a==='ALL location') return 1;
@@ -120,192 +189,262 @@ function sortLocKeys(keys){
   });
 }
 
+/* ── Render ── */
+function render(){
+  var app=document.getElementById('app');
+  var h='';
+  if(S.view==='main') h=mainView();
+  else h=settingsView();
+  if(S.editItem) h+=editModal();
+  if(S.delConfirm) h+=delModal();
+  if(S.toast) h+='<div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-2xl toast-anim flex items-center gap-2" style="max-width:90vw"><span>'+S.toastIcon+'</span><span class="truncate">'+S.toast+'</span></div>';
+  app.innerHTML=h;
+  bindAll();
+}
+
 /* ── Main View ── */
 function mainView(){
-  let items=[...S.items];
-  /* 篩選特定 Location 時，同時帶入 ALL location 項目 */
-  if(S.filterLoc!=='all') items=items.filter(i=>i.loc===S.filterLoc||i.loc==='ALL location');
-  if(S.searchText){const q=S.searchText.toLowerCase();items=items.filter(i=>i.upc.toLowerCase().includes(q)||i.name.toLowerCase().includes(q));}
+  var items=S.items.slice();
+  if(S.filterLoc!=='all') items=items.filter(function(i){return i.loc===S.filterLoc||i.loc==='ALL location';});
+  if(S.searchText){var q=S.searchText.toLowerCase();items=items.filter(function(i){return i.upc.toLowerCase().indexOf(q)!==-1||i.name.toLowerCase().indexOf(q)!==-1;});}
 
-  const grouped={};
-  items.forEach(i=>{if(!grouped[i.loc])grouped[i.loc]=[];grouped[i.loc].push(i);});
+  var grouped={};
+  items.forEach(function(i){if(!grouped[i.loc])grouped[i.loc]=[];grouped[i.loc].push(i);});
 
-  /* Dropdown 隱藏 ALL location（前台已有「全部 Location」代替） */
-  const locOpts=S.locations.filter(l=>l!=='ALL location').map(l=>`<option value="${esc(l)}" ${S.filterLoc===l?'selected':''}>${esc(l)}</option>`).join('');
+  var locOpts=S.locations.filter(function(l){return l!=='ALL location';}).map(function(l){return '<option value="'+esc(l)+'" '+(S.filterLoc===l?'selected':'')+'>'+esc(l)+'</option>';}).join('');
 
-  let h=`<div class="min-h-screen pb-6" style="background:#faf5ff">`;
+  var seasonalCount=S.items.filter(function(i){return i.startDate||i.endDate;}).length;
+  var alertItems=S.items.filter(function(i){var s=getItemStatus(i);return s&&(s.type==='ending'||s.type==='expired');});
+  var upcomingItems=S.items.filter(function(i){var s=getItemStatus(i);return s&&s.type==='upcoming';});
+
+  var h='<div class="min-h-screen pb-6" style="background:#faf5ff">';
 
   // Header
-  h+=`<div class="relative overflow-hidden" style="background:linear-gradient(135deg,#7c3aed,#a855f7,#c084fc)">`;
-  h+=`<div class="absolute top-3 right-6 w-16 h-16 rounded-full bg-white opacity-10"></div>`;
-  h+=`<div class="relative px-5 pt-14 pb-8">`;
-  h+=`<div class="flex items-center justify-between">`;
-  h+=`<div><div class="text-2xl font-black text-white">📦 UPC</div><div class="text-white text-opacity-60 text-xs mt-1">撳一下即 Copy · ${S.items.length} 件貨品</div></div>`;
-  h+=`<div class="flex gap-2">`;
-  h+=`<button data-a="refresh" class="bg-white bg-opacity-20 text-white w-11 h-11 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center justify-center">🔄</button>`;
-  h+=`<button data-a="goSettings" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center gap-1.5">⚙️ 後台</button>`;
-  h+=`</div></div></div>`;
-  h+=`<svg class="absolute bottom-0 left-0 w-full" viewBox="0 0 1440 40" preserveAspectRatio="none"><path d="M0,18 Q360,42 720,16 T1440,22 L1440,40 L0,40Z" fill="#faf5ff"/></svg>`;
-  h+=`</div>`;
+  h+='<div class="relative overflow-hidden" style="background:linear-gradient(135deg,#7c3aed,#a855f7,#c084fc)">';
+  h+='<div class="absolute top-3 right-6 w-16 h-16 rounded-full bg-white opacity-10"></div>';
+  h+='<div class="relative px-5 pt-14 pb-8">';
+  h+='<div class="flex items-center justify-between">';
+  h+='<div><div class="text-2xl font-black text-white">📦 UPC</div><div class="text-white text-opacity-60 text-xs mt-1">撳一下即 Copy · '+S.items.length+' 件貨品'+(seasonalCount?' · 🕐'+seasonalCount+' 季節性':'')+'</div></div>';
+  h+='<div class="flex gap-2">';
+  h+='<button data-a="refresh" class="bg-white bg-opacity-20 text-white w-11 h-11 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center justify-center">🔄</button>';
+  h+='<button data-a="goSettings" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center gap-1.5">⚙️ 後台</button>';
+  h+='</div></div></div>';
+  h+='<svg class="absolute bottom-0 left-0 w-full" viewBox="0 0 1440 40" preserveAspectRatio="none"><path d="M0,18 Q360,42 720,16 T1440,22 L1440,40 L0,40Z" fill="#faf5ff"/></svg>';
+  h+='</div>';
 
-  // Loading
   if(S.loading){
-    h+=`<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div>`;
-    h+=`</div>`;
+    h+='<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div></div>';
     return h;
   }
 
-  // Search + Filter
-  h+=`<div class="px-4 -mt-1 mb-3 fade-in">`;
-  h+=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-3.5">`;
-  h+=`<input id="searchField" value="${esc(S.searchText)}" placeholder="🔍 搜尋 UPC 或貨品名…" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 focus:border-purple-300 mb-2.5">`;
-  h+=`<select data-a="filterLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-semibold text-gray-600"><option value="all">📍 全部 Location</option>${locOpts}</select>`;
-  h+=`</div></div>`;
+  // Alert banners
+  if(alertItems.length>0){
+    h+='<div class="px-4 -mt-1 mb-2 fade-in"><div class="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">⏳</span><div class="text-xs font-semibold text-amber-700">'+alertItems.length+' 件貨品即將過期或已過期</div></div></div>';
+  }
+  if(upcomingItems.length>0){
+    h+='<div class="px-4 mb-2 fade-in"><div class="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">📅</span><div class="text-xs font-semibold text-blue-700">'+upcomingItems.length+' 件貨品即將開售</div></div></div>';
+  }
 
-  // Items
+  // Search + Filter
+  h+='<div class="px-4 mb-3 fade-in">';
+  h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-3.5">';
+  h+='<input id="searchField" value="'+esc(S.searchText)+'" placeholder="🔍 搜尋 UPC 或貨品名…" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 focus:border-purple-300 mb-2.5">';
+  h+='<select data-a="filterLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-semibold text-gray-600"><option value="all">📍 全部 Location</option>'+locOpts+'</select>';
+  h+='</div></div>';
+
   if(!items.length){
-    h+=`<div class="px-4 fade-in"><div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-12 text-center"><div class="text-4xl mb-3">📭</div><div class="text-purple-300 font-bold text-sm">${S.searchText||S.filterLoc!=='all'?'搵唔到結果':'未有貨品，去後台新增啦'}</div></div></div>`;
+    h+='<div class="px-4 fade-in"><div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-12 text-center"><div class="text-4xl mb-3">📭</div><div class="text-purple-300 font-bold text-sm">'+(S.searchText||S.filterLoc!=='all'?'搵唔到結果':'未有貨品，去後台新增啦')+'</div></div></div>';
   } else {
-    const locKeys=sortLocKeys(Object.keys(grouped));
-    locKeys.forEach(loc=>{
-      h+=`<div class="px-4 mb-5 fade-in">`;
-      h+=`<div class="flex items-center gap-2 mb-2.5 px-1"><span class="text-base">📍</span><span class="font-bold text-gray-500 text-sm">${esc(loc)}</span><span class="text-xs bg-purple-100 text-purple-500 px-2.5 py-0.5 rounded-full font-bold">${grouped[loc].length}</span></div>`;
-      h+=`<div class="space-y-2.5">`;
-      grouped[loc].forEach(i=>{ h+=itemCard(i); });
-      h+=`</div></div>`;
+    var locKeys=sortLocKeys(Object.keys(grouped));
+    locKeys.forEach(function(loc){
+      h+='<div class="px-4 mb-5 fade-in">';
+      h+='<div class="flex items-center gap-2 mb-2.5 px-1"><span class="text-base">📍</span><span class="font-bold text-gray-500 text-sm">'+esc(loc)+'</span><span class="text-xs bg-purple-100 text-purple-500 px-2.5 py-0.5 rounded-full font-bold">'+grouped[loc].length+'</span></div>';
+      h+='<div class="space-y-2.5">';
+      grouped[loc].forEach(function(i){ h+=itemCard(i); });
+      h+='</div></div>';
     });
   }
-  h+=`</div>`;
+  h+='</div>';
   return h;
 }
 
 function itemCard(item){
-  let h=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-4 flex items-center gap-3.5 pop-in cursor-pointer transition-all card-tap" data-a="copyItem" data-upc="${esc(item.upc)}" data-name="${esc(item.name)}" data-cid="${item.id}">`;
-  h+=`<div class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-sm" style="background:linear-gradient(135deg,#ede9fe,#ddd6fe)">📦</div>`;
-  h+=`<div class="flex-1 min-w-0">`;
-  h+=`<div class="font-black text-gray-700 text-base font-mono tracking-wider leading-snug">${esc(item.upc)}</div>`;
-  h+=`<div class="text-sm text-gray-500 truncate mt-1">${esc(item.name)}</div>`;
-  h+=`</div>`;
-  h+=`<div class="shrink-0 w-11 h-11 rounded-xl bg-purple-50 text-purple-400 flex items-center justify-center text-lg">📋</div>`;
-  h+=`</div>`;
+  var status=getItemStatus(item);
+  var isExpired=status&&status.type==='expired';
+  var isUpcoming=status&&status.type==='upcoming';
+  var borderClass=isExpired?'border-rose-200':isUpcoming?'border-blue-200':'border-purple-100';
+  var opacityClass=isExpired?'opacity-50':isUpcoming?'opacity-70':'';
+  var iconBg=isExpired?'#fee2e2,#fecaca':isUpcoming?'#dbeafe,#bfdbfe':'#ede9fe,#ddd6fe';
+
+  var h='<div class="bg-white rounded-2xl border '+borderClass+' shadow-sm p-4 flex items-center gap-3.5 pop-in cursor-pointer transition-all card-tap '+opacityClass+'" data-a="copyItem" data-upc="'+esc(item.upc)+'" data-name="'+esc(item.name)+'" data-cid="'+item.id+'">';
+  h+='<div class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-sm" style="background:linear-gradient(135deg,'+iconBg+')">'+(isUpcoming?'📅':isExpired?'⏰':'📦')+'</div>';
+  h+='<div class="flex-1 min-w-0">';
+  h+='<div class="font-black text-gray-700 text-base font-mono tracking-wider leading-snug">'+esc(item.upc)+'</div>';
+  h+='<div class="text-sm text-gray-500 truncate mt-1">'+esc(item.name)+'</div>';
+  if(status&&status.type!=='delete'){
+    h+='<div class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-lg border '+status.color+'">'+status.icon+' '+status.label+'</div>';
+  }
+  h+='</div>';
+  h+='<div class="shrink-0 w-11 h-11 rounded-xl bg-purple-50 text-purple-400 flex items-center justify-center text-lg">📋</div>';
+  h+='</div>';
   return h;
 }
 
 /* ── Settings ── */
 function settingsView(){
-  const locOpts=S.locations.map(l=>`<option value="${esc(l)}" ${S.addLoc===l?'selected':''}>${esc(l)}</option>`).join('');
+  var locOpts=S.locations.map(function(l){return '<option value="'+esc(l)+'" '+(S.addLoc===l?'selected':'')+'>'+esc(l)+'</option>';}).join('');
 
-  let h=`<div class="min-h-screen pb-8" style="background:#faf5ff">`;
+  var h='<div class="min-h-screen pb-8" style="background:#faf5ff">';
 
-  h+=`<div class="px-5 pt-14 pb-5 flex items-center justify-between" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">`;
-  h+=`<div><div class="text-white font-bold text-lg">⚙️ 後台設定</div><div class="text-purple-200 text-xs mt-0.5">新增 / 管理貨品同 Location</div></div>`;
-  h+=`<button data-a="goMain" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform">← 返回</button>`;
-  h+=`</div>`;
+  h+='<div class="px-5 pt-14 pb-5 flex items-center justify-between" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">';
+  h+='<div><div class="text-white font-bold text-lg">⚙️ 後台設定</div><div class="text-purple-200 text-xs mt-0.5">新增 / 管理貨品同 Location</div></div>';
+  h+='<button data-a="goMain" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform">← 返回</button>';
+  h+='</div>';
 
   if(S.loading){
-    h+=`<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div></div>`;
+    h+='<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div></div>';
     return h;
   }
 
-  h+=`<div class="px-4 pt-4 space-y-4">`;
+  h+='<div class="px-4 pt-4 space-y-4">';
 
   // Add item
-  h+=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">`;
-  h+=`<div class="font-bold text-gray-600 text-sm mb-4">➕ 新增貨品</div>`;
-  h+=`<div class="space-y-3">`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="addUpcF" value="${esc(S.addUpc)}" placeholder="輸入 UPC …" inputmode="numeric" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="addNameF" value="${esc(S.addName)}" placeholder="輸入貨品名稱 …" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="addLocF" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200"><option value="">-- 揀位置 --</option>${locOpts}</select></div>`;
-  h+=`<button data-a="addItem" class="w-full text-white font-bold py-4 rounded-xl text-base shadow-lg btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">${S.saving?'<span class="spinner"></span> 新增中…':'➕ 新增貨品'}</button>`;
-  h+=`</div></div>`;
+  h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
+  h+='<div class="font-bold text-gray-600 text-sm mb-4">➕ 新增貨品</div>';
+  h+='<div class="space-y-3">';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="addUpcF" value="'+esc(S.addUpc)+'" placeholder="輸入 UPC …" inputmode="numeric" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="addNameF" value="'+esc(S.addName)+'" placeholder="輸入貨品名稱 …" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="addLocF" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200"><option value="">-- 揀位置 --</option>'+locOpts+'</select></div>';
+
+  // Date range
+  h+='<div class="bg-purple-50 rounded-xl p-4 border border-purple-100 space-y-3">';
+  h+='<div class="text-xs font-bold text-purple-500 flex items-center gap-1.5">🕐 售賣期間 <span class="text-gray-300 font-normal">(留空 = 常駐貨品)</span></div>';
+  h+='<div class="flex gap-2">';
+  h+='<div class="flex-1"><label class="text-xs font-semibold text-purple-400 mb-1 block">開始日</label><input id="addStartDateF" type="date" value="'+esc(S.addStartDate)+'" class="w-full border border-purple-200 rounded-lg px-3 py-3 text-sm bg-white focus:ring-2 focus:ring-purple-200"></div>';
+  h+='<div class="flex items-end pb-3 text-purple-300 font-bold">→</div>';
+  h+='<div class="flex-1"><label class="text-xs font-semibold text-purple-400 mb-1 block">結束日</label><input id="addEndDateF" type="date" value="'+esc(S.addEndDate)+'" class="w-full border border-purple-200 rounded-lg px-3 py-3 text-sm bg-white focus:ring-2 focus:ring-purple-200"></div>';
+  h+='</div>';
+  h+='<div class="text-xs text-purple-400 leading-relaxed">結束日到期後 <b class="text-purple-600">15 日</b> 會自動刪除</div>';
+  h+='</div>';
+
+  h+='<button data-a="addItem" class="w-full text-white font-bold py-4 rounded-xl text-base shadow-lg btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">'+(S.saving?'<span class="spinner"></span> 新增中…':'➕ 新增貨品')+'</button>';
+  h+='</div></div>';
 
   // Location
-  h+=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">`;
-  h+=`<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📍 Location 管理</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">${S.locations.length} 個</span></div>`;
-  h+=`<div class="space-y-2 mb-4">`;
-  S.locations.forEach((l,i)=>{
-    const cnt=S.items.filter(x=>x.loc===l).length;
-    h+=`<div class="flex items-center gap-2.5 bg-purple-50 rounded-xl p-3.5 border border-purple-100">`;
-    h+=`<div class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,#c4b5fd,#ddd6fe)">📍</div>`;
-    h+=`<div class="flex-1"><div class="font-semibold text-gray-600 text-sm">${esc(l)}</div><div class="text-xs text-gray-400">${cnt} 件貨品</div></div>`;
-    h+=`<button data-a="delLoc" data-name="${esc(l)}" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform active:text-rose-400">✕</button>`;
-    h+=`</div>`;
+  h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
+  h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📍 Location 管理</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.locations.length+' 個</span></div>';
+  h+='<div class="space-y-2 mb-4">';
+  S.locations.forEach(function(l){
+    var cnt=S.items.filter(function(x){return x.loc===l;}).length;
+    h+='<div class="flex items-center gap-2.5 bg-purple-50 rounded-xl p-3.5 border border-purple-100">';
+    h+='<div class="w-9 h-9 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,#c4b5fd,#ddd6fe)">📍</div>';
+    h+='<div class="flex-1"><div class="font-semibold text-gray-600 text-sm">'+esc(l)+'</div><div class="text-xs text-gray-400">'+cnt+' 件貨品</div></div>';
+    h+='<button data-a="delLoc" data-name="'+esc(l)+'" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform active:text-rose-400">✕</button>';
+    h+='</div>';
   });
-  h+=`</div>`;
-  h+=`<div class="flex gap-2">`;
-  h+=`<input id="newLocField" value="${esc(S.newLocText)}" placeholder="新 Location 名稱…" class="flex-1 border border-purple-100 rounded-xl px-4 py-3 text-base bg-purple-50 bg-opacity-40 focus:ring-2 focus:ring-purple-200">`;
-  h+=`<button data-a="addLoc" class="shrink-0 px-5 py-3 rounded-xl text-white text-base font-bold btn-tap transition-transform shadow-sm" style="background:linear-gradient(135deg,#a855f7,#c084fc)">＋</button>`;
-  h+=`</div></div>`;
+  h+='</div>';
+  h+='<div class="flex gap-2">';
+  h+='<input id="newLocField" value="'+esc(S.newLocText)+'" placeholder="新 Location 名稱…" class="flex-1 border border-purple-100 rounded-xl px-4 py-3 text-base bg-purple-50 bg-opacity-40 focus:ring-2 focus:ring-purple-200">';
+  h+='<button data-a="addLoc" class="shrink-0 px-5 py-3 rounded-xl text-white text-base font-bold btn-tap transition-transform shadow-sm" style="background:linear-gradient(135deg,#a855f7,#c084fc)">＋</button>';
+  h+='</div></div>';
 
   // Item list
-  h+=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">`;
-  h+=`<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📦 貨品列表</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">${S.items.length} 件</span></div>`;
+  h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
+  h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📦 貨品列表</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.items.length+' 件</span></div>';
   if(!S.items.length){
-    h+=`<div class="text-center py-8"><div class="text-3xl mb-2">📭</div><div class="text-purple-300 text-sm font-semibold">未有貨品</div></div>`;
+    h+='<div class="text-center py-8"><div class="text-3xl mb-2">📭</div><div class="text-purple-300 text-sm font-semibold">未有貨品</div></div>';
   } else {
-    h+=`<div class="space-y-2.5">`;
-    S.items.forEach(item=>{
-      h+=`<div class="flex items-center gap-3 bg-purple-50 rounded-xl p-3.5 border border-purple-100">`;
-      h+=`<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide">${esc(item.upc)}</div><div class="text-xs text-gray-400 truncate mt-0.5">${esc(item.name)}</div><div class="text-xs text-purple-400 mt-0.5">📍 ${esc(item.loc)}</div></div>`;
-      h+=`<button data-a="editItem" data-id="${item.id}" class="w-10 h-10 rounded-xl bg-white text-purple-400 flex items-center justify-center text-sm btn-tap transition-transform">✏️</button>`;
-      h+=`<button data-a="delItem" data-id="${item.id}" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform active:text-rose-400">🗑️</button>`;
-      h+=`</div>`;
+    h+='<div class="space-y-2.5">';
+    S.items.forEach(function(item){
+      var status=getItemStatus(item);
+      var isExpired=status&&status.type==='expired';
+      var isUpcoming=status&&status.type==='upcoming';
+      var bgClass=isExpired?'bg-rose-50 border-rose-100':isUpcoming?'bg-blue-50 border-blue-100':'bg-purple-50 border-purple-100';
+      h+='<div class="flex items-center gap-3 '+bgClass+' rounded-xl p-3.5 border">';
+      h+='<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide">'+esc(item.upc)+'</div><div class="text-xs text-gray-400 truncate mt-0.5">'+esc(item.name)+'</div><div class="text-xs text-purple-400 mt-0.5">📍 '+esc(item.loc)+'</div>';
+      if(status&&status.type!=='delete'){
+        h+='<div class="mt-1 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border '+status.color+'">'+status.icon+' '+status.label+'</div>';
+      } else if(!item.startDate&&!item.endDate){
+        h+='<div class="mt-1 inline-flex items-center gap-1 text-xs text-gray-300 font-medium">♾️ 常駐</div>';
+      }
+      h+='</div>';
+      h+='<button data-a="editItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-purple-400 flex items-center justify-center text-sm btn-tap transition-transform">✏️</button>';
+      h+='<button data-a="delItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform active:text-rose-400">🗑️</button>';
+      h+='</div>';
     });
-    h+=`</div>`;
+    h+='</div>';
   }
-  h+=`</div>`;
+  h+='</div>';
 
   // Export
-  h+=`<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">`;
-  h+=`<div class="font-bold text-gray-600 text-sm mb-3">🗂️ 資料管理</div>`;
-  h+=`<button data-a="exportCSV" class="w-full text-left flex items-center gap-3 bg-green-50 rounded-xl p-4 border border-green-100 btn-tap transition-transform"><span class="text-xl">📤</span><div><div class="font-bold text-green-700 text-sm">匯出 CSV</div><div class="text-xs text-green-500">下載全部貨品資料</div></div></button>`;
-  h+=`</div>`;
+  h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
+  h+='<div class="font-bold text-gray-600 text-sm mb-3">🗂️ 資料管理</div>';
+  h+='<button data-a="exportCSV" class="w-full text-left flex items-center gap-3 bg-green-50 rounded-xl p-4 border border-green-100 btn-tap transition-transform"><span class="text-xl">📤</span><div><div class="font-bold text-green-700 text-sm">匯出 CSV</div><div class="text-xs text-green-500">下載全部貨品資料</div></div></button>';
+  h+='</div>';
 
-  h+=`</div></div>`;
+  h+='</div></div>';
   return h;
 }
 
-/* ── Modals ── */
+/* ── Edit Modal ── */
 function editModal(){
-  const r=S.editItem;
-  const locOpts=S.locations.map(l=>`<option value="${esc(l)}" ${r.loc===l?'selected':''}>${esc(l)}</option>`).join('');
-  let h=`<div class="fixed inset-0 z-50 modal-bg flex items-end justify-center" data-a="closeEdit"><div class="bg-white w-full rounded-t-3xl slide-up" style="max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">`;
-  h+=`<div class="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 mb-1"></div>`;
-  h+=`<div class="px-5 pt-3 pb-3 border-b border-purple-50 flex items-center justify-between"><div class="font-bold text-gray-600 text-base">✏️ 編輯貨品</div><button data-a="closeEdit" class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-base font-bold btn-tap">✕</button></div>`;
-  h+=`<div class="p-5 space-y-4">`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="editUpc" value="${esc(r.upc)}" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="editName" value="${esc(r.name)}" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>`;
-  h+=`<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="editLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200">${locOpts}</select></div>`;
-  h+=`<div class="flex gap-3 pt-2 pb-8"><button data-a="closeEdit" class="flex-1 bg-gray-100 text-gray-400 font-semibold py-4 rounded-xl text-base btn-tap transition-transform">取消</button><button data-a="saveEdit" class="flex-1 text-white font-bold py-4 rounded-xl text-base shadow-md btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#a855f7,#c084fc)">${S.saving?'<span class="spinner"></span>':'💾 儲存'}</button></div>`;
-  h+=`</div></div></div>`;
+  var r=S.editItem;
+  var locOpts=S.locations.map(function(l){return '<option value="'+esc(l)+'" '+(r.loc===l?'selected':'')+'>'+esc(l)+'</option>';}).join('');
+  var status=getItemStatus(r);
+  var h='<div class="fixed inset-0 z-50 modal-bg flex items-end justify-center" data-a="closeEdit"><div class="bg-white w-full rounded-t-3xl slide-up" style="max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">';
+  h+='<div class="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 mb-1"></div>';
+  h+='<div class="px-5 pt-3 pb-3 border-b border-purple-50 flex items-center justify-between"><div class="font-bold text-gray-600 text-base">✏️ 編輯貨品</div><button data-a="closeEdit" class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-base font-bold btn-tap">✕</button></div>';
+  h+='<div class="p-5 space-y-4">';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="editUpc" value="'+esc(r.upc)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="editName" value="'+esc(r.name)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="editLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200">'+locOpts+'</select></div>';
+
+  // Date range edit
+  h+='<div class="bg-purple-50 rounded-xl p-4 border border-purple-100 space-y-3">';
+  h+='<div class="text-xs font-bold text-purple-500 flex items-center gap-1.5">🕐 售賣期間 <span class="text-gray-300 font-normal">(留空 = 常駐貨品)</span></div>';
+  h+='<div class="flex gap-2">';
+  h+='<div class="flex-1"><label class="text-xs font-semibold text-purple-400 mb-1 block">開始日</label><input id="editStartDate" type="date" value="'+esc(r.startDate||'')+'" class="w-full border border-purple-200 rounded-lg px-3 py-3 text-sm bg-white focus:ring-2 focus:ring-purple-200"></div>';
+  h+='<div class="flex items-end pb-3 text-purple-300 font-bold">→</div>';
+  h+='<div class="flex-1"><label class="text-xs font-semibold text-purple-400 mb-1 block">結束日</label><input id="editEndDate" type="date" value="'+esc(r.endDate||'')+'" class="w-full border border-purple-200 rounded-lg px-3 py-3 text-sm bg-white focus:ring-2 focus:ring-purple-200"></div>';
+  h+='</div>';
+  if(r.startDate||r.endDate){
+    h+='<button data-a="clearDates" class="text-xs text-rose-400 font-semibold px-3 py-1.5 bg-rose-50 rounded-lg border border-rose-200 btn-tap transition-transform">✕ 清除日期 (改為常駐)</button>';
+  }
+  if(status&&status.type!=='delete'){
+    h+='<div class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border '+status.color+'">'+status.icon+' '+status.label+'</div>';
+  }
+  h+='</div>';
+
+  h+='<div class="flex gap-3 pt-2 pb-8"><button data-a="closeEdit" class="flex-1 bg-gray-100 text-gray-400 font-semibold py-4 rounded-xl text-base btn-tap transition-transform">取消</button><button data-a="saveEdit" class="flex-1 text-white font-bold py-4 rounded-xl text-base shadow-md btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#a855f7,#c084fc)">'+(S.saving?'<span class="spinner"></span>':'💾 儲存')+'</button></div>';
+  h+='</div></div></div>';
   return h;
 }
 
 function delModal(){
-  let h=`<div class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6" data-a="cancelDel"><div class="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl text-center pop-in" onclick="event.stopPropagation()">`;
-  h+=`<div class="text-4xl mb-3">🗑️</div><div class="font-bold text-gray-600 mb-1 text-base">確定刪除？</div><div class="text-sm text-gray-400 mb-5">${S.delConfirm.msg||'唔可以復原'}</div>`;
-  h+=`<div class="flex gap-3"><button data-a="cancelDel" class="flex-1 bg-gray-100 text-gray-400 font-semibold py-3.5 rounded-xl text-base btn-tap transition-transform">取消</button><button data-a="confirmDel" class="flex-1 bg-rose-500 text-white font-bold py-3.5 rounded-xl text-base btn-tap transition-transform flex items-center justify-center gap-2">${S.saving?'<span class="spinner"></span>':'確定'}</button></div>`;
-  h+=`</div></div>`;
+  var h='<div class="fixed inset-0 z-50 modal-bg flex items-center justify-center p-6" data-a="cancelDel"><div class="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl text-center pop-in" onclick="event.stopPropagation()">';
+  h+='<div class="text-4xl mb-3">🗑️</div><div class="font-bold text-gray-600 mb-1 text-base">確定刪除？</div><div class="text-sm text-gray-400 mb-5">'+(S.delConfirm.msg||'唔可以復原')+'</div>';
+  h+='<div class="flex gap-3"><button data-a="cancelDel" class="flex-1 bg-gray-100 text-gray-400 font-semibold py-3.5 rounded-xl text-base btn-tap transition-transform">取消</button><button data-a="confirmDel" class="flex-1 bg-rose-500 text-white font-bold py-3.5 rounded-xl text-base btn-tap transition-transform flex items-center justify-center gap-2">'+(S.saving?'<span class="spinner"></span>':'確定')+'</button></div>';
+  h+='</div></div>';
   return h;
 }
 
 /* ── Bind ── */
 function bindAll(){
-  document.querySelectorAll('[data-a]').forEach(el=>{
-    const a=el.dataset.a;
-    if(a==='filterLoc'){el.onchange=()=>{S.filterLoc=el.value;render();};return;}
+  document.querySelectorAll('[data-a]').forEach(function(el){
+    var a=el.dataset.a;
+    if(a==='filterLoc'){el.onchange=function(){S.filterLoc=el.value;render();};return;}
     el.onclick=function(ev){
       if(a==='cancelDel'&&ev.target!==this)return;
       if(a==='closeEdit'&&this.classList.contains('fixed')&&ev.target!==this)return;
       handleAction(a,el.dataset,el);
     };
   });
-  const sf=document.getElementById('searchField');
-  if(sf){sf.oninput=()=>{S.searchText=sf.value;render();};}
+  var sf=document.getElementById('searchField');
+  if(sf){sf.oninput=function(){S.searchText=sf.value;render();};}
 }
 
 function handleAction(a,d,el){
-  if(S.saving&&!['cancelDel','closeEdit','copyItem','filterLoc'].includes(a))return;
+  if(S.saving&&['cancelDel','closeEdit','copyItem','filterLoc'].indexOf(a)===-1)return;
 
   switch(a){
     case'goMain':S.view='main';S.searchText='';S.filterLoc='all';render();break;
@@ -313,100 +452,118 @@ function handleAction(a,d,el){
     case'refresh':loadAll();break;
 
     case'copyItem':{
-      const card=el.closest('[data-upc]')||el;
-      const upc=card.dataset.upc;
-      const name=card.dataset.name;
+      var card=el.closest('[data-upc]')||el;
+      var upc=card.dataset.upc;
+      var name=card.dataset.name;
       if(upc)copyText(upc,name,card);
       break;
     }
 
     case'addItem':{
-      const u=(document.getElementById('addUpcF').value||'').trim();
-      const n=(document.getElementById('addNameF').value||'').trim();
-      const l=document.getElementById('addLocF').value;
+      var u=(document.getElementById('addUpcF').value||'').trim();
+      var n=(document.getElementById('addNameF').value||'').trim();
+      var l=document.getElementById('addLocF').value;
+      var sd=document.getElementById('addStartDateF').value||'';
+      var ed=document.getElementById('addEndDateF').value||'';
       if(!u){toast('請輸入 UPC','⚠️');return;}
       if(!n){toast('請輸入貨品名','⚠️');return;}
       if(!l){toast('請揀 Location','⚠️');return;}
+      if(sd&&ed&&sd>ed){toast('開始日要早過結束日','⚠️');return;}
       S.saving=true;render();
-      api({action:'addItem',upc:u,name:n,loc:l}).then(r=>{
+      var params={action:'addItem',upc:u,name:n,loc:l};
+      if(sd)params.startDate=sd;
+      if(ed)params.endDate=ed;
+      api(params).then(function(r){
         S.saving=false;
-        if(r.success){S.addUpc='';S.addName='';S.addLoc='';toast('已新增','✅');loadAll();}
+        if(r.success){S.addUpc='';S.addName='';S.addLoc='';S.addStartDate='';S.addEndDate='';toast('已新增','✅');loadAll();}
         else{toast('失敗: '+r.error,'⚠️');render();}
-      }).catch(e=>{S.saving=false;toast('網絡錯誤','⚠️');render();});
+      }).catch(function(e){S.saving=false;toast('網絡錯誤','⚠️');render();});
       break;
     }
 
     case'editItem':{
-      const item=S.items.find(x=>x.id===d.id);
-      if(item)S.editItem={...item};
+      var item=S.items.find(function(x){return x.id===d.id;});
+      if(item){S.editItem={};for(var k in item)S.editItem[k]=item[k];}
       render();break;
     }
+    case'clearDates':{
+      if(S.editItem){
+        S.editItem.startDate='';
+        S.editItem.endDate='';
+        render();
+      }
+      break;
+    }
     case'saveEdit':{
-      const eu=document.getElementById('editUpc').value.trim();
-      const en=document.getElementById('editName').value.trim();
-      const el2=document.getElementById('editLoc').value;
+      var eu=document.getElementById('editUpc').value.trim();
+      var en=document.getElementById('editName').value.trim();
+      var el2=document.getElementById('editLoc').value;
+      var esd=document.getElementById('editStartDate').value||'';
+      var eed=document.getElementById('editEndDate').value||'';
       if(!eu){toast('UPC 唔可以空','⚠️');return;}
       if(!en){toast('貨品名唔可以空','⚠️');return;}
+      if(esd&&eed&&esd>eed){toast('開始日要早過結束日','⚠️');return;}
       S.saving=true;render();
-      api({action:'editItem',id:S.editItem.id,upc:eu,name:en,loc:el2}).then(r=>{
+      var params={action:'editItem',id:S.editItem.id,upc:eu,name:en,loc:el2,startDate:esd,endDate:eed};
+      api(params).then(function(r){
         S.saving=false;
         if(r.success){S.editItem=null;toast('已更新','✅');loadAll();}
         else{toast('失敗: '+r.error,'⚠️');render();}
-      }).catch(e=>{S.saving=false;toast('網絡錯誤','⚠️');render();});
+      }).catch(function(e){S.saving=false;toast('網絡錯誤','⚠️');render();});
       break;
     }
     case'closeEdit':S.editItem=null;render();break;
 
     case'delItem':{
-      const item=S.items.find(x=>x.id===d.id);
-      if(item)S.delConfirm={type:'item',id:item.id,msg:item.upc+' · '+item.name};
+      var item2=S.items.find(function(x){return x.id===d.id;});
+      if(item2)S.delConfirm={type:'item',id:item2.id,msg:item2.upc+' · '+item2.name};
       render();break;
     }
     case'cancelDel':S.delConfirm=null;render();break;
     case'confirmDel':{
       S.saving=true;render();
       if(S.delConfirm.type==='item'){
-        api({action:'deleteItem',id:S.delConfirm.id}).then(r=>{
+        api({action:'deleteItem',id:S.delConfirm.id}).then(function(r){
           S.saving=false;S.delConfirm=null;
           if(r.success){toast('已刪除','🗑️');loadAll();}
           else{toast('失敗: '+r.error,'⚠️');render();}
-        }).catch(e=>{S.saving=false;toast('網絡錯誤','⚠️');render();});
+        }).catch(function(e){S.saving=false;toast('網絡錯誤','⚠️');render();});
       } else if(S.delConfirm.type==='loc'){
-        api({action:'deleteLocation',name:S.delConfirm.name}).then(r=>{
+        api({action:'deleteLocation',name:S.delConfirm.name}).then(function(r){
           S.saving=false;S.delConfirm=null;
           if(r.success){toast('已刪除','✅');loadAll();}
           else{toast('失敗: '+r.error,'⚠️');render();}
-        }).catch(e=>{S.saving=false;toast('網絡錯誤','⚠️');render();});
+        }).catch(function(e){S.saving=false;toast('網絡錯誤','⚠️');render();});
       }
       break;
     }
 
     case'addLoc':{
-      const v=(document.getElementById('newLocField').value||'').trim();
+      var v=(document.getElementById('newLocField').value||'').trim();
       if(!v){toast('請輸入名稱','⚠️');return;}
       S.saving=true;render();
-      api({action:'addLocation',name:v}).then(r=>{
+      api({action:'addLocation',name:v}).then(function(r){
         S.saving=false;
         if(r.success){S.newLocText='';toast('已新增','✅');loadAll();}
         else{toast(r.error==='Already exists'?'已存在':'失敗: '+r.error,'⚠️');render();}
-      }).catch(e=>{S.saving=false;toast('網絡錯誤','⚠️');render();});
+      }).catch(function(e){S.saving=false;toast('網絡錯誤','⚠️');render();});
       break;
     }
     case'delLoc':{
-      const name=d.name;
-      const cnt=S.items.filter(x=>x.loc===name).length;
+      var locName=d.name;
+      var cnt=S.items.filter(function(x){return x.loc===locName;}).length;
       if(cnt>0){toast('有 '+cnt+' 件貨品用緊','⚠️');return;}
-      S.delConfirm={type:'loc',name:name,msg:'刪除 Location: '+name};
+      S.delConfirm={type:'loc',name:locName,msg:'刪除 Location: '+locName};
       render();break;
     }
 
     case'exportCSV':{
       if(!S.items.length){toast('無貨品可以匯出','📭');return;}
-      let csv='UPC,貨品名,Location\n';
-      S.items.forEach(i=>{csv+=`"${i.upc}","${i.name}","${i.loc}"\n`;});
-      const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-      const url=URL.createObjectURL(blob);
-      const a2=document.createElement('a');a2.href=url;a2.download='upc_'+new Date().toISOString().slice(0,10)+'.csv';a2.click();
+      var csv='UPC,貨品名,Location,開始日,結束日\n';
+      S.items.forEach(function(i){csv+='"'+i.upc+'","'+i.name+'","'+i.loc+'","'+(i.startDate||'')+'","'+(i.endDate||'')+'"\n';});
+      var blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+      var url=URL.createObjectURL(blob);
+      var a2=document.createElement('a');a2.href=url;a2.download='upc_'+new Date().toISOString().slice(0,10)+'.csv';a2.click();
       URL.revokeObjectURL(url);toast('CSV 已下載','📤');break;
     }
   }
