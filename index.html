@@ -54,7 +54,9 @@ var S={
   delConfirm:null,
   addUpc:'',addName:'',addLoc:'',addStartDate:'',addEndDate:'',
   newLocText:'',
-  cleanedCount:0
+  cleanedCount:0,
+  _refocusSearch:false,
+  _searchCursor:0
 };
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -193,6 +195,16 @@ function render(){
   if(S.toast) h+='<div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-2xl toast-anim flex items-center gap-2" style="max-width:90vw"><span>'+S.toastIcon+'</span><span class="truncate">'+S.toast+'</span></div>';
   app.innerHTML=h;
   bindAll();
+
+  /* ── 搜尋欄 refocus ── */
+  if(S._refocusSearch){
+    var nsf=document.getElementById('searchField');
+    if(nsf){
+      nsf.focus();
+      try{nsf.setSelectionRange(S._searchCursor,S._searchCursor);}catch(e){}
+    }
+    S._refocusSearch=false;
+  }
 }
 
 /* ── Main View ── */
@@ -424,7 +436,14 @@ function bindAll(){
     };
   });
   var sf=document.getElementById('searchField');
-  if(sf){sf.oninput=function(){S.searchText=sf.value;render();};}
+  if(sf){
+    sf.oninput=function(){
+      S.searchText=sf.value;
+      S._refocusSearch=true;
+      S._searchCursor=sf.selectionStart||sf.value.length;
+      render();
+    };
+  }
 }
 
 function handleAction(a,d,el){
