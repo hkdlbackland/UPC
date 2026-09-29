@@ -100,16 +100,38 @@ function render(){
   bindAll();
 }
 
+/* ── 排序 helper ── */
+function sortLocKeys(keys){
+  /* 全部 Location → ALL location 最頂，其餘跟原序 */
+  if(S.filterLoc==='all'){
+    return keys.sort((a,b)=>{
+      if(a==='ALL location') return -1;
+      if(b==='ALL location') return 1;
+      return 0;
+    });
+  }
+  /* 揀咗特定 Location → 該 Location 最頂，ALL location 最底 */
+  return keys.sort((a,b)=>{
+    if(a===S.filterLoc) return -1;
+    if(b===S.filterLoc) return 1;
+    if(a==='ALL location') return 1;
+    if(b==='ALL location') return -1;
+    return 0;
+  });
+}
+
 /* ── Main View ── */
 function mainView(){
   let items=[...S.items];
-  if(S.filterLoc!=='all') items=items.filter(i=>i.loc===S.filterLoc);
+  /* 篩選特定 Location 時，同時帶入 ALL location 項目 */
+  if(S.filterLoc!=='all') items=items.filter(i=>i.loc===S.filterLoc||i.loc==='ALL location');
   if(S.searchText){const q=S.searchText.toLowerCase();items=items.filter(i=>i.upc.toLowerCase().includes(q)||i.name.toLowerCase().includes(q));}
 
   const grouped={};
   items.forEach(i=>{if(!grouped[i.loc])grouped[i.loc]=[];grouped[i.loc].push(i);});
 
-  const locOpts=S.locations.map(l=>`<option value="${esc(l)}" ${S.filterLoc===l?'selected':''}>${esc(l)}</option>`).join('');
+  /* Dropdown 隱藏 ALL location（前台已有「全部 Location」代替） */
+  const locOpts=S.locations.filter(l=>l!=='ALL location').map(l=>`<option value="${esc(l)}" ${S.filterLoc===l?'selected':''}>${esc(l)}</option>`).join('');
 
   let h=`<div class="min-h-screen pb-6" style="background:#faf5ff">`;
 
@@ -143,12 +165,8 @@ function mainView(){
   // Items
   if(!items.length){
     h+=`<div class="px-4 fade-in"><div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-12 text-center"><div class="text-4xl mb-3">📭</div><div class="text-purple-300 font-bold text-sm">${S.searchText||S.filterLoc!=='all'?'搵唔到結果':'未有貨品，去後台新增啦'}</div></div></div>`;
-  } else if(S.filterLoc!=='all'){
-    h+=`<div class="px-4 space-y-2.5">`;
-    items.forEach(i=>{ h+=itemCard(i); });
-    h+=`</div>`;
   } else {
-    const locKeys=Object.keys(grouped);
+    const locKeys=sortLocKeys(Object.keys(grouped));
     locKeys.forEach(loc=>{
       h+=`<div class="px-4 mb-5 fade-in">`;
       h+=`<div class="flex items-center gap-2 mb-2.5 px-1"><span class="text-base">📍</span><span class="font-bold text-gray-500 text-sm">${esc(loc)}</span><span class="text-xs bg-purple-100 text-purple-500 px-2.5 py-0.5 rounded-full font-bold">${grouped[loc].length}</span></div>`;
