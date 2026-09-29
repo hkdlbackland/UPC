@@ -20,6 +20,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes flash{0%{background:#fff}30%{background:#ede9fe}100%{background:#fff}}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
 .fade-in{animation:fadeIn .3s ease-out both}
 .pop-in{animation:popIn .25s ease-out both}
 .toast-anim{animation:toastIn 2s ease both}
@@ -30,16 +31,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .modal-bg{background:rgba(80,40,120,.35);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
 .spinner-dark{border:3px solid rgba(124,58,237,.15);border-top-color:#7c3aed;width:28px;height:28px}
+.skel{background:linear-gradient(90deg,#f3e8ff 25%,#ede9fe 50%,#f3e8ff 75%);background-size:800px 100%;animation:shimmer 1.5s infinite linear;border-radius:12px}
 input,select,textarea{font-family:inherit;font-size:16px;-webkit-user-select:text;user-select:text}
 input:focus,select:focus{outline:none}
 ::-webkit-scrollbar{width:0;height:0}
+.sync-bar{height:3px;background:linear-gradient(90deg,#c084fc,#7c3aed,#c084fc);background-size:200% 100%;animation:shimmer .8s infinite linear;position:fixed;top:0;left:0;right:0;z-index:60;border-radius:0 0 2px 2px}
 </style>
 </head>
 <body>
+<div id="sync-bar"></div>
 <div id="app"></div>
 <div id="toast-root"></div>
 <script>
 var API='https://script.google.com/macros/s/AKfycbzfcLDC-pQgiVDe4hXJO_mJ8AZ9PYGvfAO91I3vMscybbYQyD8dWjokcP_KELX1cyk1/exec';
+var CACHE_KEY='upc_cache_v2';
 
 var S={
   view:'main',
@@ -48,17 +53,40 @@ var S={
   filterLoc:'all',
   searchText:'',
   loading:true,
+  syncing:false,
   saving:false,
   editItem:null,
   delConfirm:null,
   addUpc:'',addName:'',addLoc:'',addStartDate:'',addEndDate:'',
   newLocText:'',
-  cleanedCount:0,
   _toastTimer:null,
-  _animate:true
+  _animate:true,
+  _hasCache:false
 };
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+/* ── Cache（localStorage）── */
+function saveCache(){
+  try{localStorage.setItem(CACHE_KEY,JSON.stringify({items:S.items,locations:S.locations,ts:Date.now()}));}catch(e){}
+}
+function loadCache(){
+  try{
+    var raw=localStorage.getItem(CACHE_KEY);
+    if(!raw)return false;
+    var d=JSON.parse(raw);
+    if(d&&d.items&&d.locations){
+      S.items=d.items;S.locations=d.locations;S._hasCache=true;
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+/* ── Sync Bar（頂部細條，唔阻畫面）── */
+function showSyncBar(on){
+  document.getElementById('sync-bar').innerHTML=on?'<div class="sync-bar"></div>':'';
+}
 
 /* ── Toast（獨立，唔觸發 render）── */
 function showToast(msg,icon){
@@ -95,19 +123,45 @@ function api(params){
   var url=API+'?'+Object.keys(params).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);}).join('&');
   return fetch(url).then(function(r){return r.json();});
 }
-function loadAll(){
-  S.loading=true;S._animate=true;render();
+
+function loadAll(silent){
+  /* 有 cache 就用 cache 先頂住，再背景更新 */
+  if(!silent){
+    var hasCached=loadCache();
+    if(hasCached){
+      S.loading=false;S.syncing=true;
+      render();showSyncBar(true);
+    }else{
+      S.loading=true;S._animate=true;render();
+    }
+  }else{
+    S.syncing=true;showSyncBar(true);
+  }
+
   api({action:'getAll'}).then(function(r){
-    if(r.success){S.items=r.items||[];S.locations=r.locations||[];}
-    else showToast('載入失敗: '+r.error,'⚠️');
-    S.loading=false;autoCleanExpired();render();
-  }).catch(function(){S.loading=false;showToast('網絡錯誤','⚠️');render();});
+    if(r.success){
+      S.items=r.items||[];S.locations=r.locations||[];
+      saveCache();
+    }else{
+      if(!S._hasCache)showToast('載入失敗: '+r.error,'⚠️');
+    }
+    S.loading=false;S.syncing=false;showSyncBar(false);
+    autoCleanExpired();render();
+    if(silent)showToast('已更新','✅');
+  }).catch(function(){
+    S.loading=false;S.syncing=false;showSyncBar(false);
+    if(!S._hasCache)showToast('網絡錯誤','⚠️');
+    else showToast('離線模式（用緊快取資料）','📴');
+    render();
+  });
 }
+
 function autoCleanExpired(){
   var toDelete=S.items.filter(function(i){if(!i.endDate)return false;var d=daysDiff(i.endDate);return d!==null&&d<-15;});
   if(!toDelete.length)return;
   var delIds=toDelete.map(function(i){return i.id;});
   S.items=S.items.filter(function(i){return delIds.indexOf(i.id)===-1;});
+  saveCache();
   toDelete.forEach(function(item){api({action:'deleteItem',id:item.id}).catch(function(){});});
   setTimeout(function(){showToast('已自動刪除 '+toDelete.length+' 件過期貨品','🧹');},600);
 }
@@ -145,11 +199,24 @@ function render(){
   app.innerHTML=h;
 }
 
-/* 只更新貨品列表（搜尋/篩選用） */
 function renderItems(){
   S._animate=false;
   var el=document.getElementById('items-container');
   if(el)el.innerHTML=buildItemsList();
+}
+
+/* ── Skeleton Cards ── */
+function skeletonCards(){
+  var h='<div class="px-4 space-y-3 mt-2">';
+  for(var i=0;i<5;i++){
+    h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-4 flex items-center gap-3.5" style="animation-delay:'+(i*80)+'ms">';
+    h+='<div class="skel w-12 h-12 shrink-0"></div>';
+    h+='<div class="flex-1 space-y-2"><div class="skel h-4 w-3/5"></div><div class="skel h-3 w-2/5"></div></div>';
+    h+='<div class="skel w-11 h-11 shrink-0"></div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  return h;
 }
 
 /* ── Main View ── */
@@ -166,7 +233,9 @@ function mainView(){
   h+='<div class="absolute top-3 right-6 w-16 h-16 rounded-full bg-white opacity-10"></div>';
   h+='<div class="relative px-5 pt-14 pb-8">';
   h+='<div class="flex items-center justify-between">';
-  h+='<div><div class="text-2xl font-black text-white">📦 UPC</div><div class="text-white text-opacity-60 text-xs mt-1">撳一下即 Copy · '+S.items.length+' 件貨品'+(seasonalCount?' · 🕐'+seasonalCount+' 季節性':'')+'</div></div>';
+  h+='<div><div class="text-2xl font-black text-white">📦 UPC</div><div class="text-white text-opacity-60 text-xs mt-1">撳一下即 Copy · '+S.items.length+' 件貨品'+(seasonalCount?' · 🕐'+seasonalCount+' 季節性':'');
+  if(S.syncing)h+=' · <span class="inline-block align-middle"><span class="spinner" style="width:10px;height:10px;border-width:2px"></span></span> 同步中';
+  h+='</div></div>';
   h+='<div class="flex gap-2">';
   h+='<button data-a="refresh" class="bg-white bg-opacity-20 text-white w-11 h-11 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center justify-center">🔄</button>';
   h+='<button data-a="goSettings" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform flex items-center gap-1.5">⚙️ 後台</button>';
@@ -174,8 +243,10 @@ function mainView(){
   h+='<svg class="absolute bottom-0 left-0 w-full" viewBox="0 0 1440 40" preserveAspectRatio="none"><path d="M0,18 Q360,42 720,16 T1440,22 L1440,40 L0,40Z" fill="#faf5ff"/></svg>';
   h+='</div>';
 
+  /* Skeleton Loading（只喺完全無 cache 先出）*/
   if(S.loading){
-    h+='<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div></div>';
+    h+=skeletonCards();
+    h+='</div>';
     return h;
   }
 
@@ -201,7 +272,7 @@ function mainView(){
   return h;
 }
 
-/* ── Build Items List（獨立出嚟方便局部更新）── */
+/* ── Build Items List ── */
 function buildItemsList(){
   var items=S.items.slice();
   if(S.filterLoc!=='all')items=items.filter(function(i){return i.loc===S.filterLoc||i.loc==='ALL location';});
@@ -260,8 +331,9 @@ function settingsView(){
   h+='<button data-a="goMain" class="bg-white bg-opacity-20 text-white h-11 px-4 rounded-2xl text-sm font-semibold btn-tap transition-transform">← 返回</button>';
   h+='</div>';
 
-  if(S.loading){
-    h+='<div class="flex flex-col items-center justify-center py-20 fade-in"><div class="spinner-dark spinner mb-4"></div><div class="text-purple-300 text-sm font-semibold">載入中…</div></div></div>';
+  if(S.loading&&!S._hasCache){
+    h+=skeletonCards();
+    h+='</div>';
     return h;
   }
 
@@ -386,19 +458,17 @@ function delModal(){
 }
 
 /* ══════════════════════════════════════
-   Event Delegation（setup 一次，永久有效）
+   Event Delegation
    ══════════════════════════════════════ */
 function setupEvents(){
   var app=document.getElementById('app');
 
-  /* Click */
   app.addEventListener('click',function(ev){
     var el=ev.target.closest('[data-a]');
     if(!el)return;
     handleAction(el.dataset.a,el.dataset,el,ev);
   });
 
-  /* Search Input */
   app.addEventListener('input',function(ev){
     if(ev.target.id==='searchField'){
       S.searchText=ev.target.value;
@@ -406,7 +476,6 @@ function setupEvents(){
     }
   });
 
-  /* Filter Change */
   app.addEventListener('change',function(ev){
     if(ev.target.dataset&&ev.target.dataset.a==='filterLoc'){
       S.filterLoc=ev.target.value;
@@ -422,7 +491,7 @@ function handleAction(a,d,el,ev){
   switch(a){
     case'goMain':S.view='main';S.searchText='';S.filterLoc='all';render();break;
     case'goSettings':S.view='settings';render();break;
-    case'refresh':loadAll();break;
+    case'refresh':loadAll(true);break;
 
     case'copyItem':{
       var card=el.closest('[data-upc]')||el;
@@ -479,7 +548,6 @@ function handleAction(a,d,el,ev){
       break;
     }
     case'closeEdit':{
-      /* 如果係 backdrop（modal-bg），要撳到背景先關，撳 modal 內容唔關 */
       if(el.classList.contains('modal-bg')&&ev.target!==el)break;
       S.editItem=null;render();break;
     }
