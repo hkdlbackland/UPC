@@ -64,7 +64,7 @@ function toast(m,icon){S.toast=m;S.toastIcon=icon||'';render();setTimeout(functi
 function fmtDate(d){
   if(!d)return '';
   var dt=new Date(d+'T00:00:00');
-  return (dt.getMonth()+1)+'/'+dt.getDate();
+  return dt.getFullYear()+'/'+(dt.getMonth()+1)+'/'+dt.getDate();
 }
 function fmtDateMD(d){
   if(!d)return '';
@@ -85,29 +85,25 @@ function daysDiff(dateStr){
 function getItemStatus(item){
   var hasStart=!!item.startDate;
   var hasEnd=!!item.endDate;
-  if(!hasStart&&!hasEnd) return null; // 常駐
+  if(!hasStart&&!hasEnd) return null;
 
   var now=todayStr();
   var diffStart=hasStart?daysDiff(item.startDate):null;
   var diffEnd=hasEnd?daysDiff(item.endDate):null;
 
-  // 未開始
   if(hasStart&&diffStart>0){
     return {type:'upcoming',label:fmtDateMD(item.startDate)+' 開始'+(hasEnd?' → '+fmtDateMD(item.endDate):''),color:'bg-blue-50 text-blue-500 border-blue-200',icon:'🔵',hide:false};
   }
-  // 售賣中（有結束日）
   if(hasEnd&&diffEnd>7){
     var range=(hasStart?fmtDate(item.startDate)+' → ':'')+fmtDate(item.endDate);
     return {type:'active',label:'售賣中 ('+range+')',color:'bg-emerald-50 text-emerald-600 border-emerald-200',icon:'🟢',hide:false};
   }
-  // 即將完結
   if(hasEnd&&diffEnd>0){
     return {type:'ending',label:'剩 '+diffEnd+' 日結束',color:'bg-amber-50 text-amber-600 border-amber-200',icon:'🟡',hide:false};
   }
   if(hasEnd&&diffEnd===0){
     return {type:'ending',label:'今日最後一日',color:'bg-amber-50 text-amber-600 border-amber-200',icon:'🟡',hide:false};
   }
-  // 已過期
   if(hasEnd&&diffEnd<0){
     var past=Math.abs(diffEnd);
     if(past<=15){
@@ -115,7 +111,6 @@ function getItemStatus(item){
     }
     return {type:'delete'};
   }
-  // 只有開始日，已開始
   if(hasStart&&!hasEnd&&diffStart<=0){
     return {type:'active',label:fmtDateMD(item.startDate)+' 起售賣',color:'bg-emerald-50 text-emerald-600 border-emerald-200',icon:'🟢',hide:false};
   }
@@ -139,7 +134,6 @@ function loadAll(){
   }).catch(function(e){S.loading=false;toast('網絡錯誤','⚠️');render();});
 }
 
-/* ── Auto clean expired > 15 days ── */
 function autoCleanExpired(){
   var toDelete=S.items.filter(function(i){
     if(!i.endDate)return false;
@@ -171,7 +165,6 @@ function fb(text,upc,name){
   document.body.removeChild(ta);
 }
 
-/* ── Sort helper ── */
 function sortLocKeys(keys){
   if(S.filterLoc==='all'){
     return keys.sort(function(a,b){
@@ -219,7 +212,6 @@ function mainView(){
 
   var h='<div class="min-h-screen pb-6" style="background:#faf5ff">';
 
-  // Header
   h+='<div class="relative overflow-hidden" style="background:linear-gradient(135deg,#7c3aed,#a855f7,#c084fc)">';
   h+='<div class="absolute top-3 right-6 w-16 h-16 rounded-full bg-white opacity-10"></div>';
   h+='<div class="relative px-5 pt-14 pb-8">';
@@ -237,7 +229,6 @@ function mainView(){
     return h;
   }
 
-  // Alert banners
   if(alertItems.length>0){
     h+='<div class="px-4 -mt-1 mb-2 fade-in"><div class="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">⏳</span><div class="text-xs font-semibold text-amber-700">'+alertItems.length+' 件貨品即將過期或已過期</div></div></div>';
   }
@@ -245,7 +236,6 @@ function mainView(){
     h+='<div class="px-4 mb-2 fade-in"><div class="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">📅</span><div class="text-xs font-semibold text-blue-700">'+upcomingItems.length+' 件貨品即將開售</div></div></div>';
   }
 
-  // Search + Filter
   h+='<div class="px-4 mb-3 fade-in">';
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-3.5">';
   h+='<input id="searchField" value="'+esc(S.searchText)+'" placeholder="🔍 搜尋 UPC 或貨品名…" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 focus:border-purple-300 mb-2.5">';
@@ -308,7 +298,6 @@ function settingsView(){
 
   h+='<div class="px-4 pt-4 space-y-4">';
 
-  // Add item
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4">➕ 新增貨品</div>';
   h+='<div class="space-y-3">';
@@ -316,7 +305,6 @@ function settingsView(){
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="addNameF" value="'+esc(S.addName)+'" placeholder="輸入貨品名稱 …" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="addLocF" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200"><option value="">-- 揀位置 --</option>'+locOpts+'</select></div>';
 
-  // Date range
   h+='<div class="bg-purple-50 rounded-xl p-4 border border-purple-100 space-y-3">';
   h+='<div class="text-xs font-bold text-purple-500 flex items-center gap-1.5">🕐 售賣期間 <span class="text-gray-300 font-normal">(留空 = 常駐貨品)</span></div>';
   h+='<div class="flex gap-2">';
@@ -330,7 +318,6 @@ function settingsView(){
   h+='<button data-a="addItem" class="w-full text-white font-bold py-4 rounded-xl text-base shadow-lg btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">'+(S.saving?'<span class="spinner"></span> 新增中…':'➕ 新增貨品')+'</button>';
   h+='</div></div>';
 
-  // Location
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📍 Location 管理</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.locations.length+' 個</span></div>';
   h+='<div class="space-y-2 mb-4">';
@@ -348,7 +335,6 @@ function settingsView(){
   h+='<button data-a="addLoc" class="shrink-0 px-5 py-3 rounded-xl text-white text-base font-bold btn-tap transition-transform shadow-sm" style="background:linear-gradient(135deg,#a855f7,#c084fc)">＋</button>';
   h+='</div></div>';
 
-  // Item list
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📦 貨品列表</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.items.length+' 件</span></div>';
   if(!S.items.length){
@@ -376,7 +362,6 @@ function settingsView(){
   }
   h+='</div>';
 
-  // Export
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-3">🗂️ 資料管理</div>';
   h+='<button data-a="exportCSV" class="w-full text-left flex items-center gap-3 bg-green-50 rounded-xl p-4 border border-green-100 btn-tap transition-transform"><span class="text-xl">📤</span><div><div class="font-bold text-green-700 text-sm">匯出 CSV</div><div class="text-xs text-green-500">下載全部貨品資料</div></div></button>';
@@ -399,7 +384,6 @@ function editModal(){
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="editName" value="'+esc(r.name)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="editLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200">'+locOpts+'</select></div>';
 
-  // Date range edit
   h+='<div class="bg-purple-50 rounded-xl p-4 border border-purple-100 space-y-3">';
   h+='<div class="text-xs font-bold text-purple-500 flex items-center gap-1.5">🕐 售賣期間 <span class="text-gray-300 font-normal">(留空 = 常駐貨品)</span></div>';
   h+='<div class="flex gap-2">';
