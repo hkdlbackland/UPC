@@ -66,7 +66,6 @@ var S={
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
-/* ── Cache（localStorage）── */
 function saveCache(){
   try{localStorage.setItem(CACHE_KEY,JSON.stringify({items:S.items,locations:S.locations,ts:Date.now()}));}catch(e){}
 }
@@ -83,12 +82,10 @@ function loadCache(){
   return false;
 }
 
-/* ── Sync Bar（頂部細條，唔阻畫面）── */
 function showSyncBar(on){
   document.getElementById('sync-bar').innerHTML=on?'<div class="sync-bar"></div>':'';
 }
 
-/* ── Toast（獨立，唔觸發 render）── */
 function showToast(msg,icon){
   clearTimeout(S._toastTimer);
   var root=document.getElementById('toast-root');
@@ -98,7 +95,6 @@ function showToast(msg,icon){
   S._toastTimer=setTimeout(function(){var r=document.getElementById('toast-root');if(r)r.innerHTML='';},2200);
 }
 
-/* ── Date helpers ── */
 function fmtDate(d){if(!d)return '';var dt=new Date(d+'T00:00:00');return dt.getFullYear()+'/'+(dt.getMonth()+1)+'/'+dt.getDate();}
 function fmtDateMD(d){if(!d)return '';var dt=new Date(d+'T00:00:00');return(dt.getMonth()+1)+'月'+dt.getDate()+'日';}
 function todayStr(){var n=new Date();return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');}
@@ -118,14 +114,12 @@ function getItemStatus(item){
   return null;
 }
 
-/* ── API ── */
 function api(params){
   var url=API+'?'+Object.keys(params).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);}).join('&');
   return fetch(url).then(function(r){return r.json();});
 }
 
 function loadAll(silent){
-  /* 有 cache 就用 cache 先頂住，再背景更新 */
   if(!silent){
     var hasCached=loadCache();
     if(hasCached){
@@ -166,7 +160,6 @@ function autoCleanExpired(){
   setTimeout(function(){showToast('已自動刪除 '+toDelete.length+' 件過期貨品','🧹');},600);
 }
 
-/* ── Copy（唔 render）── */
 function copyText(upc,name,el){
   var text=upc+'\n'+name;
   if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -185,9 +178,6 @@ function sortLocKeys(keys){
   return keys.sort(function(a,b){if(a===S.filterLoc)return -1;if(b===S.filterLoc)return 1;if(a==='ALL location')return 1;if(b==='ALL location')return -1;return 0;});
 }
 
-/* ══════════════════════════════════════
-   Render
-   ══════════════════════════════════════ */
 function render(){
   S._animate=true;
   var app=document.getElementById('app');
@@ -205,7 +195,6 @@ function renderItems(){
   if(el)el.innerHTML=buildItemsList();
 }
 
-/* ── Skeleton Cards ── */
 function skeletonCards(){
   var h='<div class="px-4 space-y-3 mt-2">';
   for(var i=0;i<5;i++){
@@ -219,7 +208,6 @@ function skeletonCards(){
   return h;
 }
 
-/* ── Main View ── */
 function mainView(){
   var seasonalCount=S.items.filter(function(i){return i.startDate||i.endDate;}).length;
   var alertItems=S.items.filter(function(i){var s=getItemStatus(i);return s&&(s.type==='ending'||s.type==='expired');});
@@ -228,7 +216,6 @@ function mainView(){
 
   var h='<div class="min-h-screen pb-6" style="background:#faf5ff">';
 
-  /* Header */
   h+='<div class="relative overflow-hidden" style="background:linear-gradient(135deg,#7c3aed,#a855f7,#c084fc)">';
   h+='<div class="absolute top-3 right-6 w-16 h-16 rounded-full bg-white opacity-10"></div>';
   h+='<div class="relative px-5 pt-14 pb-8">';
@@ -243,14 +230,12 @@ function mainView(){
   h+='<svg class="absolute bottom-0 left-0 w-full" viewBox="0 0 1440 40" preserveAspectRatio="none"><path d="M0,18 Q360,42 720,16 T1440,22 L1440,40 L0,40Z" fill="#faf5ff"/></svg>';
   h+='</div>';
 
-  /* Skeleton Loading（只喺完全無 cache 先出）*/
   if(S.loading){
     h+=skeletonCards();
     h+='</div>';
     return h;
   }
 
-  /* Alerts */
   if(alertItems.length>0){
     h+='<div class="px-4 -mt-1 mb-2 fade-in"><div class="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">⏳</span><div class="text-xs font-semibold text-amber-700">'+alertItems.length+' 件貨品即將過期或已過期</div></div></div>';
   }
@@ -258,21 +243,18 @@ function mainView(){
     h+='<div class="px-4 mb-2 fade-in"><div class="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-2.5"><span class="text-lg">📅</span><div class="text-xs font-semibold text-blue-700">'+upcomingItems.length+' 件貨品即將開售</div></div></div>';
   }
 
-  /* Search + Filter */
   h+='<div class="px-4 mb-3 fade-in">';
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-3.5">';
   h+='<input id="searchField" value="'+esc(S.searchText)+'" placeholder="🔍 搜尋 UPC 或貨品名…" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 focus:border-purple-300 mb-2.5">';
   h+='<select data-a="filterLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-semibold text-gray-600"><option value="all">📍 全部 Location</option>'+locOpts+'</select>';
   h+='</div></div>';
 
-  /* Items Container */
   h+='<div id="items-container">'+buildItemsList()+'</div>';
 
   h+='</div>';
   return h;
 }
 
-/* ── Build Items List ── */
 function buildItemsList(){
   var items=S.items.slice();
   if(S.filterLoc!=='all')items=items.filter(function(i){return i.loc===S.filterLoc||i.loc==='ALL location';});
@@ -309,7 +291,7 @@ function itemCard(item,anim){
   var h='<div class="bg-white rounded-2xl border '+borderClass+' shadow-sm p-4 flex items-center gap-3.5 cursor-pointer transition-all card-tap '+opacityClass+(anim?' pop-in':'')+'" data-a="copyItem" data-upc="'+esc(item.upc)+'" data-name="'+esc(item.name)+'" data-cid="'+item.id+'">';
   h+='<div class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-sm" style="background:linear-gradient(135deg,'+iconBg+')">'+(isUpcoming?'📅':isExpired?'⏰':'📦')+'</div>';
   h+='<div class="flex-1 min-w-0">';
-  h+='<div class="font-black text-gray-700 text-base font-mono tracking-wider leading-snug">'+esc(item.upc)+'</div>';
+  h+='<div class="font-black text-gray-700 text-base font-mono tracking-wide leading-snug break-all">'+esc(item.upc)+'</div>';
   h+='<div class="text-sm text-gray-500 truncate mt-1">'+esc(item.name)+'</div>';
   if(status&&status.type!=='delete'){
     h+='<div class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-lg border '+status.color+'">'+status.icon+' '+status.label+'</div>';
@@ -320,7 +302,6 @@ function itemCard(item,anim){
   return h;
 }
 
-/* ── Settings View ── */
 function settingsView(){
   var locOpts=S.locations.map(function(l){return '<option value="'+esc(l)+'" '+(S.addLoc===l?'selected':'')+'>'+esc(l)+'</option>';}).join('');
 
@@ -339,11 +320,10 @@ function settingsView(){
 
   h+='<div class="px-4 pt-4 space-y-4">';
 
-  /* Add Item */
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4">➕ 新增貨品</div>';
   h+='<div class="space-y-3">';
-  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="addUpcF" value="'+esc(S.addUpc)+'" placeholder="輸入 UPC …" inputmode="numeric" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="addUpcF" value="'+esc(S.addUpc)+'" placeholder="輸入 UPC …" inputmode="numeric" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wide"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="addNameF" value="'+esc(S.addName)+'" placeholder="輸入貨品名稱 …" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="addLocF" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200"><option value="">-- 揀位置 --</option>'+locOpts+'</select></div>';
 
@@ -360,7 +340,6 @@ function settingsView(){
   h+='<button data-a="addItem" class="w-full text-white font-bold py-4 rounded-xl text-base shadow-lg btn-tap transition-transform flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">'+(S.saving?'<span class="spinner"></span> 新增中…':'➕ 新增貨品')+'</button>';
   h+='</div></div>';
 
-  /* Location Management */
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📍 Location 管理</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.locations.length+' 個</span></div>';
   h+='<div class="space-y-2 mb-4">';
@@ -378,7 +357,6 @@ function settingsView(){
   h+='<button data-a="addLoc" class="shrink-0 px-5 py-3 rounded-xl text-white text-base font-bold btn-tap transition-transform shadow-sm" style="background:linear-gradient(135deg,#a855f7,#c084fc)">＋</button>';
   h+='</div></div>';
 
-  /* Item List */
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-4 flex items-center justify-between"><span>📦 貨品列表</span><span class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-lg font-bold">'+S.items.length+' 件</span></div>';
   if(!S.items.length){
@@ -391,22 +369,21 @@ function settingsView(){
       var isUpcoming=status&&status.type==='upcoming';
       var bgClass=isExpired?'bg-rose-50 border-rose-100':isUpcoming?'bg-blue-50 border-blue-100':'bg-purple-50 border-purple-100';
       h+='<div class="flex items-center gap-3 '+bgClass+' rounded-xl p-3.5 border">';
-      h+='<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide">'+esc(item.upc)+'</div><div class="text-xs text-gray-400 truncate mt-0.5">'+esc(item.name)+'</div><div class="text-xs text-purple-400 mt-0.5">📍 '+esc(item.loc)+'</div>';
+      h+='<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide break-all">'+esc(item.upc)+'</div><div class="text-xs text-gray-400 truncate mt-0.5">'+esc(item.name)+'</div><div class="text-xs text-purple-400 mt-0.5">📍 '+esc(item.loc)+'</div>';
       if(status&&status.type!=='delete'){
         h+='<div class="mt-1 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border '+status.color+'">'+status.icon+' '+status.label+'</div>';
       }else if(!item.startDate&&!item.endDate){
         h+='<div class="mt-1 inline-flex items-center gap-1 text-xs text-gray-300 font-medium">♾️ 常駐</div>';
       }
       h+='</div>';
-      h+='<button data-a="editItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-purple-400 flex items-center justify-center text-sm btn-tap transition-transform">✏️</button>';
-      h+='<button data-a="delItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform active:text-rose-400">🗑️</button>';
+      h+='<button data-a="editItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-purple-400 flex items-center justify-center text-sm btn-tap transition-transform shrink-0">✏️</button>';
+      h+='<button data-a="delItem" data-id="'+item.id+'" class="w-10 h-10 rounded-xl bg-white text-gray-300 flex items-center justify-center text-sm btn-tap transition-transform shrink-0">🗑️</button>';
       h+='</div>';
     });
     h+='</div>';
   }
   h+='</div>';
 
-  /* Export */
   h+='<div class="bg-white rounded-2xl border border-purple-100 shadow-sm p-5 fade-in">';
   h+='<div class="font-bold text-gray-600 text-sm mb-3">🗂️ 資料管理</div>';
   h+='<button data-a="exportCSV" class="w-full text-left flex items-center gap-3 bg-green-50 rounded-xl p-4 border border-green-100 btn-tap transition-transform"><span class="text-xl">📤</span><div><div class="font-bold text-green-700 text-sm">匯出 CSV</div><div class="text-xs text-green-500">下載全部貨品資料</div></div></button>';
@@ -416,7 +393,6 @@ function settingsView(){
   return h;
 }
 
-/* ── Edit Modal ── */
 function editModal(){
   var r=S.editItem;
   var locOpts=S.locations.map(function(l){return '<option value="'+esc(l)+'" '+(r.loc===l?'selected':'')+'>'+esc(l)+'</option>';}).join('');
@@ -425,7 +401,7 @@ function editModal(){
   h+='<div class="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 mb-1"></div>';
   h+='<div class="px-5 pt-3 pb-3 border-b border-purple-50 flex items-center justify-between"><div class="font-bold text-gray-600 text-base">✏️ 編輯貨品</div><button data-a="closeEdit" class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-base font-bold btn-tap">✕</button></div>';
   h+='<div class="p-5 space-y-4">';
-  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="editUpc" value="'+esc(r.upc)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wider"></div>';
+  h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">UPC</label><input id="editUpc" value="'+esc(r.upc)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200 font-mono tracking-wide"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">貨品名</label><input id="editName" value="'+esc(r.name)+'" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-purple-50 bg-opacity-30 focus:ring-2 focus:ring-purple-200"></div>';
   h+='<div><label class="text-xs font-bold text-purple-400 mb-1.5 block">Location</label><select id="editLoc" class="w-full border border-purple-100 rounded-xl px-4 py-3.5 text-base bg-white focus:ring-2 focus:ring-purple-200">'+locOpts+'</select></div>';
 
@@ -457,9 +433,6 @@ function delModal(){
   return h;
 }
 
-/* ══════════════════════════════════════
-   Event Delegation
-   ══════════════════════════════════════ */
 function setupEvents(){
   var app=document.getElementById('app');
 
@@ -484,7 +457,6 @@ function setupEvents(){
   });
 }
 
-/* ── Action Handler ── */
 function handleAction(a,d,el,ev){
   if(S.saving&&['cancelDel','closeEdit','copyItem'].indexOf(a)===-1)return;
 
@@ -610,7 +582,6 @@ function handleAction(a,d,el,ev){
   }
 }
 
-/* ── Init ── */
 setupEvents();
 loadAll();
 </script>
