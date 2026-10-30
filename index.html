@@ -288,16 +288,16 @@ function itemCard(item,anim){
   var opacityClass=isExpired?'opacity-50':isUpcoming?'opacity-70':'';
   var iconBg=isExpired?'#fee2e2,#fecaca':isUpcoming?'#dbeafe,#bfdbfe':'#ede9fe,#ddd6fe';
 
-  var h='<div class="bg-white rounded-2xl border '+borderClass+' shadow-sm p-4 flex items-center gap-3.5 cursor-pointer transition-all card-tap '+opacityClass+(anim?' pop-in':'')+'" data-a="copyItem" data-upc="'+esc(item.upc)+'" data-name="'+esc(item.name)+'" data-cid="'+item.id+'">';
-  h+='<div class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-sm" style="background:linear-gradient(135deg,'+iconBg+')">'+(isUpcoming?'📅':isExpired?'⏰':'📦')+'</div>';
+  var h='<div class="bg-white rounded-2xl border '+borderClass+' shadow-sm p-4 flex items-start gap-3.5 cursor-pointer transition-all card-tap '+opacityClass+(anim?' pop-in':'')+'" data-a="copyItem" data-upc="'+esc(item.upc)+'" data-name="'+esc(item.name)+'" data-cid="'+item.id+'">';
+  h+='<div class="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-sm mt-0.5" style="background:linear-gradient(135deg,'+iconBg+')">'+(isUpcoming?'📅':isExpired?'⏰':'📦')+'</div>';
   h+='<div class="flex-1 min-w-0">';
   h+='<div class="font-black text-gray-700 text-base font-mono tracking-wide leading-snug break-all">'+esc(item.upc)+'</div>';
-  h+='<div class="text-sm text-gray-500 truncate mt-1">'+esc(item.name)+'</div>';
+  h+='<div class="text-sm text-gray-500 mt-1 break-words leading-snug">'+esc(item.name)+'</div>';
   if(status&&status.type!=='delete'){
     h+='<div class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-lg border '+status.color+'">'+status.icon+' '+status.label+'</div>';
   }
   h+='</div>';
-  h+='<div class="shrink-0 w-11 h-11 rounded-xl bg-purple-50 text-purple-400 flex items-center justify-center text-lg">📋</div>';
+  h+='<div class="shrink-0 w-11 h-11 rounded-xl bg-purple-50 text-purple-400 flex items-center justify-center text-lg mt-0.5">📋</div>';
   h+='</div>';
   return h;
 }
@@ -368,8 +368,8 @@ function settingsView(){
       var isExpired=status&&status.type==='expired';
       var isUpcoming=status&&status.type==='upcoming';
       var bgClass=isExpired?'bg-rose-50 border-rose-100':isUpcoming?'bg-blue-50 border-blue-100':'bg-purple-50 border-purple-100';
-      h+='<div class="flex items-center gap-3 '+bgClass+' rounded-xl p-3.5 border">';
-      h+='<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide break-all">'+esc(item.upc)+'</div><div class="text-xs text-gray-400 truncate mt-0.5">'+esc(item.name)+'</div><div class="text-xs text-purple-400 mt-0.5">📍 '+esc(item.loc)+'</div>';
+      h+='<div class="flex items-start gap-3 '+bgClass+' rounded-xl p-3.5 border">';
+      h+='<div class="flex-1 min-w-0"><div class="font-bold text-gray-600 text-sm font-mono tracking-wide break-all">'+esc(item.upc)+'</div><div class="text-xs text-gray-400 mt-0.5 break-words">'+esc(item.name)+'</div><div class="text-xs text-purple-400 mt-0.5">📍 '+esc(item.loc)+'</div>';
       if(status&&status.type!=='delete'){
         h+='<div class="mt-1 inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md border '+status.color+'">'+status.icon+' '+status.label+'</div>';
       }else if(!item.startDate&&!item.endDate){
